@@ -19,12 +19,17 @@ _DATE_START = re.compile(
 # Amount pattern anywhere in text: $13.48, -$609.87, $1,234.56
 _AMOUNT_PATTERN = re.compile(r"(-?\$[\d,]+\.\d{2})")
 
-# Statement year detection — look for month names or MM/ near a 4-digit year
-_YEAR_PATTERN = re.compile(
-    r"(?:january|february|march|april|may|june|july|august|september|"
-    r"october|november|december|\d{1,2}/\d{1,2}/)\s*(20\d{2})\b",
+# Statement year detection patterns
+_BILLING_PERIOD_YEAR = re.compile(
+    r"(?:billing|statement)\s+(?:period|date|closing).*?(\d{1,2}/\d{1,2}/)(20\d{2})",
     re.IGNORECASE,
 )
+_MONTH_YEAR = re.compile(
+    r"(?:january|february|march|april|may|june|july|august|september|"
+    r"october|november|december)\s+(20\d{2})\b",
+    re.IGNORECASE,
+)
+_DATE_SLASH_YEAR = re.compile(r"\d{1,2}/\d{1,2}/(20\d{2})\b")
 
 # Section headers to skip
 _SECTION_HEADERS = {
@@ -202,9 +207,30 @@ def _build_transaction(
 
 
 def _detect_year(lines: list[str]) -> int:
-    """Try to detect the statement year from header lines."""
+    """Try to detect the statement year from header lines.
+    
+    Priority: billing period line > month name + year > MM/DD/YYYY date.
+    For billing periods, use the *last* (end) date's year.
+    """
+    # Pass 1: look for billing period / statement date lines
     for line in lines[:30]:
-        match = _YEAR_PATTERN.search(line)
+        match = _BILLING_PERIOD_YEAR.search(line)
+        if match:
+            # Find ALL years on this line, take the last one (end of period)
+            all_years = _DATE_SLASH_YEAR.findall(line)
+            if all_years:
+                return int(all_years[-1])
+            return int(match.group(2))
+
+    # Pass 2: month name followed by year (e.g. "January 2025 Statement")
+    for line in lines[:30]:
+        match = _MONTH_YEAR.search(line)
+        if match:
+            return int(match.group(1))
+
+    # Pass 3: any MM/DD/YYYY date
+    for line in lines[:30]:
+        match = _DATE_SLASH_YEAR.search(line)
         if match:
             return int(match.group(1))
 

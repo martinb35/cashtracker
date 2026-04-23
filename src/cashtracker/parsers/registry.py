@@ -6,10 +6,12 @@ from typing import Any
 
 from cashtracker.models import ParsedStatement
 from cashtracker.parsers.base import StatementNormalizer
+from cashtracker.parsers.credit_card_text import CreditCardTextNormalizer
 from cashtracker.parsers.generic_csv import GenericCSVNormalizer
 
 # Built-in normalizers (institution-specific ones can be added here)
 _NORMALIZERS: list[StatementNormalizer] = [
+    CreditCardTextNormalizer(),
     GenericCSVNormalizer(),
 ]
 

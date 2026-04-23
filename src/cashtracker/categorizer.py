@@ -35,12 +35,17 @@ class CategorizationResult:
 PromptFn = Callable[[Transaction, Optional[str], list[str]], Optional[tuple[str, str]]]
 
 
+# Callback for saving keywords incrementally
+SaveFn = Callable[[dict[str, list[str]]], None] | None
+
+
 def categorize_transactions(
     transactions: list[Transaction],
     config: Config,
     use_ai: bool = True,
     interactive: bool = False,
     prompt_fn: PromptFn | None = None,
+    save_fn: SaveFn = None,
 ) -> CategorizationResult:
     """Categorize transactions using a layered approach.
 
@@ -89,6 +94,9 @@ def categorize_transactions(
                 result.add_learned_keyword(category, keyword)
                 # Apply learned keyword immediately for remaining transactions
                 config.categories.setdefault(category, []).append(keyword)
+                # Save incrementally so keywords persist even if user quits early
+                if save_fn:
+                    save_fn(result.learned_keywords)
             else:
                 txn.category = "uncategorized"
                 txn.confidence = 0.0

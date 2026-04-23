@@ -85,17 +85,23 @@ def parse(
         raise SystemExit(1)
 
     # Categorize
+    def _save_keywords(learned: dict[str, list[str]]) -> None:
+        save_learned_keywords(learned, config_path)
+
     result = categorize_transactions(
         statement.transactions,
         cfg,
         use_ai=not no_ai,
         interactive=interactive,
         prompt_fn=_interactive_prompt if interactive else None,
+        save_fn=_save_keywords if interactive else None,
     )
 
-    # Save learned keywords
+    # Report saved keywords
     if result.learned_keywords:
-        save_learned_keywords(result.learned_keywords, config_path)
+        if not interactive:
+            # Non-interactive mode: save at the end
+            save_learned_keywords(result.learned_keywords, config_path)
         total = sum(len(kws) for kws in result.learned_keywords.values())
         click.echo(f"\nLearned {total} new keyword(s), saved to {config_path}", err=True)
 

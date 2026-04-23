@@ -19,8 +19,12 @@ _DATE_START = re.compile(
 # Amount pattern anywhere in text: $13.48, -$609.87, $1,234.56
 _AMOUNT_PATTERN = re.compile(r"(-?\$[\d,]+\.\d{2})")
 
-# Statement year detection from header lines
-_YEAR_PATTERN = re.compile(r"\b(20\d{2})\b")
+# Statement year detection — look for month names or MM/ near a 4-digit year
+_YEAR_PATTERN = re.compile(
+    r"(?:january|february|march|april|may|june|july|august|september|"
+    r"october|november|december|\d{1,2}/\d{1,2}/)\s*(20\d{2})\b",
+    re.IGNORECASE,
+)
 
 # Section headers to skip
 _SECTION_HEADERS = {
@@ -199,7 +203,7 @@ def _build_transaction(
 
 def _detect_year(lines: list[str]) -> int:
     """Try to detect the statement year from header lines."""
-    for line in lines[:15]:
+    for line in lines[:30]:
         match = _YEAR_PATTERN.search(line)
         if match:
             return int(match.group(1))

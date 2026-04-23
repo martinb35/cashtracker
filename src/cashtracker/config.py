@@ -12,16 +12,70 @@ import yaml
 DEFAULT_CONFIG_NAME = "categories.yaml"
 
 DEFAULT_CATEGORIES: dict[str, list[str]] = {
-    "groceries": ["grocery", "supermarket", "whole foods", "trader joe", "kroger", "aldi", "publix"],
-    "dining": ["restaurant", "cafe", "coffee", "mcdonald", "starbucks", "doordash", "grubhub", "uber eats"],
-    "utilities": ["electric", "gas", "water", "internet", "phone", "utility", "comcast", "verizon", "at&t"],
-    "transportation": ["gas station", "fuel", "uber", "lyft", "parking", "toll", "transit"],
-    "entertainment": ["netflix", "spotify", "hulu", "movie", "theater", "gaming", "steam"],
-    "healthcare": ["pharmacy", "doctor", "medical", "dental", "hospital", "cvs", "walgreens"],
-    "subscriptions": ["subscription", "membership", "annual fee", "monthly fee"],
-    "shopping": ["amazon", "walmart", "target", "ebay", "etsy"],
-    "income": ["payroll", "direct deposit", "salary", "wage", "dividend", "interest income"],
-    "transfers": ["transfer", "zelle", "venmo", "paypal", "wire"],
+    "groceries": [
+        "grocery", "supermarket", "whole foods", "trader joe", "kroger", "aldi", "publix",
+        "safeway", "costco", "sam's club", "winco", "fred meyer", "qfc", "haggen",
+        "sprouts", "h-e-b", "heb", "meijer", "food lion", "piggly wiggly",
+        "albertsons", "vons", "ralphs", "wegmans", "stop & shop", "giant",
+    ],
+    "dining": [
+        "restaurant", "cafe", "coffee", "mcdonald", "starbucks", "doordash", "grubhub", "uber eats",
+        "chick-fil-a", "chipotle", "subway", "wendy", "burger king", "taco bell", "panda express",
+        "domino", "pizza hut", "papa john", "five guys", "in-n-out", "jack in the box",
+        "denny", "ihop", "applebee", "olive garden", "red lobster", "outback",
+        "panera", "dunkin", "dutch bros", "peet's", "tim horton",
+        "postmates", "seamless", "caviar", "gopuff",
+        "brewing", "brewery", "taproom", "pub", "bar & grill", "tavern",
+        "bakery", "deli", "bistro", "grill", "kitchen", "eatery",
+    ],
+    "utilities": [
+        "electric", "gas", "water", "internet", "phone", "utility",
+        "comcast", "verizon", "at&t", "t-mobile", "sprint", "xfinity",
+        "spectrum", "cox", "centurylink", "frontier", "att",
+        "pge", "pg&e", "duke energy", "con edison", "dominion energy",
+        "sewer", "trash", "waste", "garbage",
+    ],
+    "transportation": [
+        "gas station", "fuel", "uber", "lyft", "parking", "toll", "transit",
+        "shell", "chevron", "exxon", "mobil", "bp", "arco", "76",
+        "costco gas", "safeway fuel", "fred meyer fuel",
+        "metro", "bus", "train", "amtrak", "greyhound", "ferry",
+    ],
+    "entertainment": [
+        "netflix", "spotify", "hulu", "movie", "theater", "gaming", "steam",
+        "disney+", "disney plus", "hbo", "max", "peacock", "paramount",
+        "apple tv", "youtube", "twitch", "xbox", "playstation", "nintendo",
+        "amc", "regal", "cinemark", "fandango",
+        "ticketmaster", "stubhub", "livenation", "concert", "event",
+    ],
+    "healthcare": [
+        "pharmacy", "doctor", "medical", "dental", "hospital", "cvs", "walgreens",
+        "rite aid", "kaiser", "labcorp", "quest diagnostics",
+        "optometrist", "vision", "eyecare", "urgent care", "clinic",
+        "therapist", "counseling", "mental health",
+    ],
+    "subscriptions": [
+        "subscription", "membership", "annual fee", "monthly fee",
+        "adobe", "microsoft 365", "google storage", "icloud",
+        "dropbox", "github", "openai", "chatgpt",
+        "gym", "fitness", "planet fitness", "24 hour",
+    ],
+    "shopping": [
+        "amazon", "walmart", "target", "ebay", "etsy",
+        "best buy", "home depot", "lowe's", "lowes", "ikea",
+        "nordstrom", "macy", "ross", "tj maxx", "marshalls",
+        "nike", "adidas", "old navy", "gap", "h&m", "zara",
+        "bath & body", "sephora", "ulta",
+        "play it again", "goodwill", "thrift",
+    ],
+    "income": [
+        "payroll", "direct deposit", "salary", "wage", "dividend", "interest income",
+        "payment thank you", "autopay", "automatic payment",
+    ],
+    "transfers": [
+        "transfer", "zelle", "venmo", "paypal", "wire",
+        "cash app", "square cash", "wise", "remitly",
+    ],
     "uncategorized": [],
 }
 

@@ -16,7 +16,7 @@ DATE_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 AMOUNT_PATTERNS = re.compile(
-    r"^(amount|debit|credit|transaction\s*amount|charge|payment)$",
+    r"^(amount|transaction\s*amount|charge|payment)$",
     re.IGNORECASE,
 )
 DESCRIPTION_PATTERNS = re.compile(

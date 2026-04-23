@@ -30,6 +30,13 @@ _SECTION_HEADERS = {
     "minimum payment", "payment due",
 }
 
+# Transaction descriptions that indicate payments/credits to skip
+_PAYMENT_PATTERNS = re.compile(
+    r"^(payment\s+thank\s+you|autopay|automatic\s+payment|payment\s+received|"
+    r"credit\s+adjustment|balance\s+transfer|returned\s+payment)",
+    re.IGNORECASE,
+)
+
 
 class CreditCardTextNormalizer(StatementNormalizer):
     """Normalizer for credit card PDF statements extracted as text lines.
@@ -99,6 +106,10 @@ class CreditCardTextNormalizer(StatementNormalizer):
 
             if not description:
                 description = "(no description)"
+
+            # Skip payment/credit transactions
+            if _PAYMENT_PATTERNS.match(description):
+                continue
 
             txn = _build_transaction(
                 sale_date_str, post_date_str, description,

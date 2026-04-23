@@ -44,16 +44,14 @@ class TestCreditCardTextNormalizer:
         assert "CHICK-FIL-A" in txn.raw_description
         assert txn.amount == Decimal("13.48")
 
-    def test_normalize_payment_negative(self):
+    def test_normalize_payment_skipped(self):
+        """Payment lines are filtered out."""
         data = _make_lines([
             "January 2024 Statement",
             "01/13 PAYMENT THANK YOU -$609.87",
         ])
         result = self.normalizer.normalize(data)
-        assert len(result.transactions) == 1
-        txn = result.transactions[0]
-        assert txn.amount == Decimal("-609.87")
-        assert txn.posted_date is None
+        assert len(result.transactions) == 0
 
     def test_skips_section_headers(self):
         data = _make_lines([
@@ -65,7 +63,8 @@ class TestCreditCardTextNormalizer:
             "12/19 12/19 CHICK-FIL-A #03801 $13.48",
         ])
         result = self.normalizer.normalize(data)
-        assert len(result.transactions) == 2
+        assert len(result.transactions) == 1
+        assert "CHICK-FIL-A" in result.transactions[0].raw_description
 
     def test_detects_year_from_header(self):
         data = _make_lines([

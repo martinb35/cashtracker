@@ -86,3 +86,34 @@ class TestCreditCardTextNormalizer:
         result = self.normalizer.normalize(data)
         assert len(result.transactions) == 4
         assert result.transactions[3].amount == Decimal("69.69")
+
+    def test_multiline_transaction(self):
+        """Transaction where description wraps to next line with the amount."""
+        data = _make_lines([
+            "January 2024 Statement",
+            "12/29 12/29 PIE FOR THE PEOPLE NW    SNOQUALMIE",
+            " PAWA $63.35",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 1
+        txn = result.transactions[0]
+        assert txn.transaction_date == date(2024, 12, 29)
+        assert "PIE FOR THE PEOPLE" in txn.raw_description
+        assert "PAWA" in txn.raw_description
+        assert txn.amount == Decimal("63.35")
+
+    def test_multiline_mixed_with_single(self):
+        """Mix of single-line and multi-line transactions."""
+        data = _make_lines([
+            "January 2024 Statement",
+            "12/19 12/19 CHICK-FIL-A #03801 $13.48",
+            "12/29 12/29 PIE FOR THE PEOPLE NW    SNOQUALMIE",
+            " PAWA $63.35",
+            "12/30 12/30 STARBUCKS STORE $5.50",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 3
+        assert result.transactions[0].amount == Decimal("13.48")
+        assert "PIE FOR THE PEOPLE" in result.transactions[1].raw_description
+        assert result.transactions[1].amount == Decimal("63.35")
+        assert result.transactions[2].amount == Decimal("5.50")

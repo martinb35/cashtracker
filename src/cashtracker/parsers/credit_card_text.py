@@ -30,10 +30,10 @@ _SECTION_HEADERS = {
     "minimum payment", "payment due",
 }
 
-# Transaction descriptions that indicate payments/credits to skip
+# Transaction descriptions that indicate payments to skip (not credits/returns)
 _PAYMENT_PATTERNS = re.compile(
     r"^(payment\s+thank\s+you|autopay|automatic\s+payment|payment\s+received|"
-    r"credit\s+adjustment|balance\s+transfer|returned\s+payment)",
+    r"balance\s+transfer|returned\s+payment)",
     re.IGNORECASE,
 )
 

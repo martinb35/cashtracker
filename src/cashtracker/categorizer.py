@@ -99,15 +99,25 @@ def categorize_transactions(
 
 
 def _match_keywords(description: str, categories: dict[str, list[str]]) -> str | None:
-    """Match a transaction description against category keywords."""
+    """Match a transaction description against category keywords.
+    
+    Prefers the longest matching keyword to ensure specific matches
+    (e.g. 'costco gas' → transportation) beat generic ones ('costco' → costco).
+    """
     desc_lower = description.lower()
+    best_category: str | None = None
+    best_length = 0
+
     for category, keywords in categories.items():
         if category == "uncategorized":
             continue
         for keyword in keywords:
-            if keyword.lower() in desc_lower:
-                return category
-    return None
+            kw = keyword.lower()
+            if kw in desc_lower and len(kw) > best_length:
+                best_length = len(kw)
+                best_category = category
+
+    return best_category
 
 
 def _categorize_with_ollama(transactions: list[Transaction], config: Config) -> None:

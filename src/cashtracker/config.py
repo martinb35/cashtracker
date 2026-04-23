@@ -147,6 +147,16 @@ def _parse_config(raw: dict[str, Any]) -> Config:
         if "uncategorized" not in config.categories:
             config.categories["uncategorized"] = []
 
+        # Auto-merge any new default categories the user doesn't have yet
+        for name, keywords in DEFAULT_CATEGORIES.items():
+            if name not in config.categories:
+                config.categories[name] = list(keywords)
+                # Remove keywords that migrated to the new category
+                for kw in keywords:
+                    for other_name, other_kws in config.categories.items():
+                        if other_name != name and kw in other_kws:
+                            other_kws.remove(kw)
+
     if "ollama" in raw:
         oll = raw["ollama"]
         if isinstance(oll, dict):

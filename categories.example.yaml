@@ -14,7 +14,6 @@ categories:
     - aldi
     - publix
     - safeway
-    - costco
     - sam's club
     - winco
     - fred meyer
@@ -246,6 +245,8 @@ categories:
     - square cash
     - wise
     - remitly
+  costco:
+    - costco
   uncategorized: []
 
 # Ollama settings for AI categorization

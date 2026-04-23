@@ -14,7 +14,7 @@ DEFAULT_CONFIG_NAME = "categories.yaml"
 DEFAULT_CATEGORIES: dict[str, list[str]] = {
     "groceries": [
         "grocery", "supermarket", "whole foods", "trader joe", "kroger", "aldi", "publix",
-        "safeway", "costco", "sam's club", "winco", "fred meyer", "qfc", "haggen",
+        "safeway", "sam's club", "winco", "fred meyer", "qfc", "haggen",
         "sprouts", "h-e-b", "heb", "meijer", "food lion", "piggly wiggly",
         "albertsons", "vons", "ralphs", "wegmans", "stop & shop", "giant",
     ],
@@ -75,6 +75,9 @@ DEFAULT_CATEGORIES: dict[str, list[str]] = {
     "transfers": [
         "transfer", "zelle", "venmo", "paypal", "wire",
         "cash app", "square cash", "wise", "remitly",
+    ],
+    "costco": [
+        "costco",
     ],
     "uncategorized": [],
 }

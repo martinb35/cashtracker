@@ -168,3 +168,27 @@ class TestCreditCardTextNormalizer:
         assert len(result.transactions) == 1
         assert str(result.transactions[0].amount) == "44.04"
         assert "Year To Date" not in result.transactions[0].raw_description
+
+    def test_two_column_layout_description_before_date(self):
+        """Two-column PDF: description on line before date+amount line."""
+        data = _make_lines([
+            "Billing Period: 12/17/24-01/15/25",
+            "12/28 TST*COMMONWEALTH CAFE 425-434-0808 $83.71 electric vehicle (EV) charging purchases",
+            "WA worldwide, including gas and EV charging at",
+            "PIE FOR THE PEOPLE NW SNOQUALMIE Costco1................................................. +$0.00",
+            "12/29 12/29 $63.35",
+            "PAWA",
+            "3% on restaurants ............................... +$46.57",
+            "12/31 12/31 FSP*DRU BRU SNOQUALMIE PAWA $31.13",
+            "RED MOUNTAIN COFFEE SNOQUALMIE 3% on eligible travel worldwide.............. +$0.00",
+            "01/02 01/02 $53.38",
+            "PSWA",
+        ])
+        result = self.normalizer.normalize(data)
+        pie = [t for t in result.transactions if str(t.amount) == "63.35"]
+        assert len(pie) == 1
+        assert "PIE FOR THE PEOPLE" in pie[0].raw_description
+
+        red = [t for t in result.transactions if str(t.amount) == "53.38"]
+        assert len(red) == 1
+        assert "RED MOUNTAIN COFFEE" in red[0].raw_description

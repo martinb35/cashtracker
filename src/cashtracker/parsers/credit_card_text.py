@@ -43,6 +43,18 @@ _SUMMARY_NOISE = re.compile(
     r"certificate\s+amount|earned\s+this\s+period|summary",
     re.IGNORECASE,
 )
+
+# Right-column rewards/summary text that pdfplumber merges with transaction lines
+# Patterns like: "Costco1................. +$0.00", "3% on restaurants ... +$46.57",
+# "electric vehicle (EV) charging purchases", "worldwide, including gas and EV charging at"
+_RIGHT_COLUMN_NOISE = re.compile(
+    r"\.{3,}\s*\+?\$[\d,.]+$|"       # ...+$0.00 or ...$46.57 at end of line
+    r"\d+%\s+on\s+.+$|"               # "3% on restaurants..." reward descriptions
+    r"electric\s+vehicle.*$|"          # EV charging text
+    r"worldwide.*$|"                   # "worldwide, including..."
+    r"Costco\d*\.{3,}.*$",            # "Costco1................. +$0.00"
+    re.IGNORECASE,
+)
 _PAYMENT_PATTERNS = re.compile(
     r"^(payment\s+thank\s+you|autopay|automatic\s+payment|payment\s+received|"
     r"balance\s+transfer|returned\s+payment)",
@@ -149,12 +161,20 @@ class CreditCardTextNormalizer(StatementNormalizer):
         )
 
 
+def _clean_line(line: str) -> str:
+    """Strip right-column rewards/summary noise from a line."""
+    cleaned = _RIGHT_COLUMN_NOISE.sub("", line).strip()
+    return cleaned
+
+
 def _group_into_blocks(lines: list[str]) -> list[list[str]]:
     """Group lines into transaction blocks.
 
     A new block starts when a line begins with a date pattern (MM/DD).
-    Continuation lines (indented or non-date lines) are appended to the current block.
-    Section headers and empty lines are skipped.
+    Continuation lines are appended to the current block.
+    When a date line has no description text (just date + amount), the last
+    line of the previous block is moved to the new block as the description.
+    This handles two-column PDF layouts where descriptions precede their dates.
     """
     blocks: list[list[str]] = []
     current_block: list[str] = []
@@ -164,12 +184,27 @@ def _group_into_blocks(lines: list[str]) -> list[list[str]]:
         if not stripped or _is_section_header(stripped):
             continue
 
-        if _DATE_START.match(stripped):
-            if current_block:
+        cleaned = _clean_line(stripped)
+        if not cleaned:
+            continue
+
+        if _DATE_START.match(cleaned):
+            # Check if this date line has description text or just date + amount
+            date_match = _DATE_START.match(cleaned)
+            remaining = cleaned[date_match.end():].strip() if date_match else ""
+            has_desc = bool(remaining) and not remaining.startswith("$") and not remaining.startswith("-$")
+
+            if not has_desc and current_block and len(current_block) > 1:
+                # The last line of the previous block is likely THIS transaction's description
+                stolen_desc = current_block.pop()
                 blocks.append(current_block)
-            current_block = [stripped]
-        elif current_block and not _SUMMARY_NOISE.search(stripped):
-            current_block.append(stripped)
+                current_block = [cleaned, stolen_desc]
+            else:
+                if current_block:
+                    blocks.append(current_block)
+                current_block = [cleaned]
+        elif current_block and not _SUMMARY_NOISE.search(cleaned):
+            current_block.append(cleaned)
 
     if current_block:
         blocks.append(current_block)

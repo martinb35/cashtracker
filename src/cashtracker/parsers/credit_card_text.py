@@ -108,16 +108,26 @@ class CreditCardTextNormalizer(StatementNormalizer):
             amount_match = amount_matches[0]
             amount_str = amount_match.group(1)
 
-            # Description is everything before the amount
+            # Description is everything except the amount
             desc_before = all_text[:amount_match.start()].strip()
-            description = desc_before
-
-            # Strip any summary noise from description
-            noise_match = _SUMMARY_NOISE.search(description)
+            desc_after = all_text[amount_match.end():].strip()
+            
+            # Strip summary noise from both parts
+            noise_match = _SUMMARY_NOISE.search(desc_before)
             if noise_match:
-                description = description[:noise_match.start()].strip()
-
-            if not description:
+                desc_before = desc_before[:noise_match.start()].strip()
+            noise_match = _SUMMARY_NOISE.search(desc_after)
+            if noise_match:
+                desc_after = desc_after[:noise_match.start()].strip()
+            
+            # Combine, preferring before but using after if before is empty
+            if desc_before and desc_after:
+                description = f"{desc_before} {desc_after}"
+            elif desc_before:
+                description = desc_before
+            elif desc_after:
+                description = desc_after
+            else:
                 description = "(no description)"
 
             # Skip payment/credit transactions

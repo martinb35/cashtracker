@@ -19,11 +19,8 @@ _DATE_START = re.compile(
 # Amount pattern anywhere in text: $13.48, -$609.87, $1,234.56
 _AMOUNT_PATTERN = re.compile(r"(-?\$[\d,]+\.\d{2})")
 
-# Statement year detection patterns
-_BILLING_PERIOD_YEAR = re.compile(
-    r"(?:billing|statement)\s+(?:period|date|closing)",
-    re.IGNORECASE,
-)
+# Billing period date extraction — supports MM/DD/YY and MM/DD/YYYY
+_BILLING_DATE = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{2,4})")
 _MONTH_YEAR = re.compile(
     r"(?:january|february|march|april|may|june|july|august|september|"
     r"october|november|december)\s+(20\d{2})\b",
@@ -75,6 +72,7 @@ class CreditCardTextNormalizer(StatementNormalizer):
         lines = [row["_raw_line"] for row in raw_data if "_raw_line" in row]
 
         statement_year = _detect_year(lines)
+        billing_period = _detect_billing_period(lines)
         transactions = []
         warnings = []
 
@@ -123,7 +121,7 @@ class CreditCardTextNormalizer(StatementNormalizer):
 
             txn = _build_transaction(
                 sale_date_str, post_date_str, description,
-                amount_str, statement_year, source_file, warnings,
+                amount_str, billing_period, statement_year, source_file, warnings,
             )
             if txn:
                 transactions.append(txn)
@@ -175,13 +173,14 @@ def _build_transaction(
     post_date_str: str | None,
     description: str,
     amount_str: str,
-    statement_year: int,
+    billing_period: tuple[int, int, int, int] | None,
+    fallback_year: int,
     source_file: str,
     warnings: list[str],
 ) -> Transaction | None:
     """Build a Transaction from parsed components."""
     try:
-        txn_date = _parse_mmdd(sale_date_str, statement_year)
+        txn_date = _parse_mmdd(sale_date_str, billing_period, fallback_year)
     except ValueError:
         warnings.append(f"Could not parse date: {sale_date_str}")
         return None
@@ -189,7 +188,7 @@ def _build_transaction(
     posted = None
     if post_date_str:
         try:
-            posted = _parse_mmdd(post_date_str, statement_year)
+            posted = _parse_mmdd(post_date_str, billing_period, fallback_year)
         except ValueError:
             pass
 
@@ -209,11 +208,9 @@ def _build_transaction(
 
 def _extract_year_from_line(line: str) -> int | None:
     """Extract a year from a line, supporting both 2-digit and 4-digit years."""
-    # Try 4-digit years first
     matches_4 = _DATE_4DIGIT_YEAR.findall(line)
     if matches_4:
         return int(matches_4[-1])
-    # Try 2-digit years
     matches_2 = _DATE_2DIGIT_YEAR.findall(line)
     if matches_2:
         yy = int(matches_2[-1])
@@ -221,41 +218,83 @@ def _extract_year_from_line(line: str) -> int | None:
     return None
 
 
-def _detect_year(lines: list[str]) -> int:
-    """Try to detect the statement year from header lines.
-    
-    Priority: billing period line > month name + year > any dated line.
-    For billing periods, use the *last* (end) date's year.
-    """
-    # Pass 1: look for billing period / statement date lines
-    for line in lines[:30]:
-        if _BILLING_PERIOD_YEAR.search(line):
-            year = _extract_year_from_line(line)
-            if year:
-                return year
+def _to_full_year(yy_or_yyyy: int) -> int:
+    """Convert a 2-digit or 4-digit year to a full 4-digit year."""
+    if yy_or_yyyy < 80:
+        return 2000 + yy_or_yyyy
+    if yy_or_yyyy < 100:
+        return 1900 + yy_or_yyyy
+    return yy_or_yyyy
 
-    # Pass 2: month name followed by year (e.g. "January 2025 Statement")
+
+def _detect_billing_period(lines: list[str]) -> tuple[int, int, int, int] | None:
+    """Detect billing period and return (start_month, start_year, end_month, end_year).
+    
+    Returns None if no billing period found.
+    """
+    billing_re = re.compile(
+        r"(?:billing|statement)\s+(?:period|date|closing)", re.IGNORECASE
+    )
+    for line in lines[:30]:
+        if billing_re.search(line):
+            dates = _BILLING_DATE.findall(line)
+            if len(dates) >= 2:
+                sm, _, sy = dates[0]
+                em, _, ey = dates[1]
+                return (int(sm), _to_full_year(int(sy)),
+                        int(em), _to_full_year(int(ey)))
+            elif len(dates) == 1:
+                em, _, ey = dates[0]
+                return (None, None, int(em), _to_full_year(int(ey)))
+    return None
+
+
+def _detect_year(lines: list[str]) -> int:
+    """Fallback: detect a single year from header lines."""
     for line in lines[:30]:
         match = _MONTH_YEAR.search(line)
         if match:
             return int(match.group(1))
-
-    # Pass 3: any MM/DD/YY or MM/DD/YYYY date
     for line in lines[:30]:
         year = _extract_year_from_line(line)
         if year:
             return year
-
     from datetime import date as _date
     return _date.today().year
 
 
-def _parse_mmdd(value: str, year: int) -> date:
-    """Parse MM/DD with an assumed year."""
+def _resolve_year(month: int, billing_period: tuple[int, int, int, int] | None,
+                  fallback_year: int) -> int:
+    """Pick the correct year for a transaction month given a billing period.
+    
+    If the billing period spans a year boundary (e.g. Dec 2024 - Jan 2025),
+    months >= start_month get start_year, months <= end_month get end_year.
+    """
+    if billing_period is None:
+        return fallback_year
+
+    start_month, start_year, end_month, end_year = billing_period
+    if start_month is None:
+        return end_year
+
+    if start_year == end_year:
+        return end_year
+
+    # Year boundary: e.g. start=Dec 2024, end=Jan 2025
+    if month >= start_month:
+        return start_year
+    else:
+        return end_year
+
+
+def _parse_mmdd(value: str, billing_period: tuple[int, int, int, int] | None,
+                fallback_year: int) -> date:
+    """Parse MM/DD with the correct year based on billing period."""
     parts = value.strip().split("/")
     if len(parts) != 2:
         raise ValueError(f"Invalid date: {value}")
     month, day = int(parts[0]), int(parts[1])
+    year = _resolve_year(month, billing_period, fallback_year)
     return date(year, month, day)
 
 

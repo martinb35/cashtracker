@@ -1,0 +1,92 @@
+# CashTracker Categories Configuration
+#
+# Each category has a list of keyword hints used for rule-based matching.
+# Transaction descriptions are matched against these keywords (case-insensitive).
+# Transactions that don't match any keyword are sent to Ollama for AI categorization.
+
+categories:
+  groceries:
+    - grocery
+    - supermarket
+    - whole foods
+    - trader joe
+    - kroger
+    - aldi
+    - publix
+  dining:
+    - restaurant
+    - cafe
+    - coffee
+    - mcdonald
+    - starbucks
+    - doordash
+    - grubhub
+    - uber eats
+  utilities:
+    - electric
+    - gas
+    - water
+    - internet
+    - phone
+    - utility
+    - comcast
+    - verizon
+    - at&t
+  transportation:
+    - gas station
+    - fuel
+    - uber
+    - lyft
+    - parking
+    - toll
+    - transit
+  entertainment:
+    - netflix
+    - spotify
+    - hulu
+    - movie
+    - theater
+    - gaming
+    - steam
+  healthcare:
+    - pharmacy
+    - doctor
+    - medical
+    - dental
+    - hospital
+    - cvs
+    - walgreens
+  subscriptions:
+    - subscription
+    - membership
+    - annual fee
+    - monthly fee
+  shopping:
+    - amazon
+    - walmart
+    - target
+    - ebay
+    - etsy
+  income:
+    - payroll
+    - direct deposit
+    - salary
+    - wage
+    - dividend
+    - interest income
+  transfers:
+    - transfer
+    - zelle
+    - venmo
+    - paypal
+    - wire
+  uncategorized: []
+
+# Ollama settings for AI categorization
+# num_gpu: -1 = offload all layers to GPU (recommended with NVIDIA GPU)
+ollama:
+  model: llama3.2
+  base_url: http://localhost:11434
+  timeout: 30.0
+  num_gpu: -1
+  max_batch_size: 10

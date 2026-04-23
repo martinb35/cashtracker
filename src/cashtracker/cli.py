@@ -27,7 +27,8 @@ def main() -> None:
 @click.option("--config", "-c", type=click.Path(path_type=Path), default=None, help="Categories config file")
 @click.option("--model", "-m", type=str, default=None, help="Ollama model name")
 @click.option("--no-ai", is_flag=True, default=False, help="Skip Ollama, use keyword rules only")
-def parse(file: Path, output: Path | None, config: Path | None, model: str | None, no_ai: bool) -> None:
+@click.option("--debug-headers", is_flag=True, default=False, help="Print extracted column headers and exit (no data shown)")
+def parse(file: Path, output: Path | None, config: Path | None, model: str | None, no_ai: bool, debug_headers: bool) -> None:
     """Parse a bank statement and categorize transactions."""
     cfg = load_config(config)
     if model:
@@ -35,6 +36,14 @@ def parse(file: Path, output: Path | None, config: Path | None, model: str | Non
 
     # Read raw data
     raw_data = _read_file(file)
+
+    if debug_headers:
+        if raw_data:
+            click.echo(f"Extracted {len(raw_data)} rows")
+            click.echo(f"Column headers: {list(raw_data[0].keys())}")
+        else:
+            click.echo("No data extracted from file.")
+        return
 
     # Parse into transactions
     statement = detect_and_parse(raw_data, source_file=str(file))

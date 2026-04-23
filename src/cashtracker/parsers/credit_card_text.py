@@ -21,7 +21,7 @@ _AMOUNT_PATTERN = re.compile(r"(-?\$[\d,]+\.\d{2})")
 
 # Statement year detection patterns
 _BILLING_PERIOD_YEAR = re.compile(
-    r"(?:billing|statement)\s+(?:period|date|closing).*?(\d{1,2}/\d{1,2}/)(20\d{2})",
+    r"(?:billing|statement)\s+(?:period|date|closing)",
     re.IGNORECASE,
 )
 _MONTH_YEAR = re.compile(
@@ -29,7 +29,8 @@ _MONTH_YEAR = re.compile(
     r"october|november|december)\s+(20\d{2})\b",
     re.IGNORECASE,
 )
-_DATE_SLASH_YEAR = re.compile(r"\d{1,2}/\d{1,2}/(20\d{2})\b")
+_DATE_4DIGIT_YEAR = re.compile(r"\d{1,2}/\d{1,2}/(20\d{2})\b")
+_DATE_2DIGIT_YEAR = re.compile(r"\d{1,2}/\d{1,2}/(\d{2})\b")
 
 # Section headers to skip
 _SECTION_HEADERS = {
@@ -206,21 +207,32 @@ def _build_transaction(
     )
 
 
+def _extract_year_from_line(line: str) -> int | None:
+    """Extract a year from a line, supporting both 2-digit and 4-digit years."""
+    # Try 4-digit years first
+    matches_4 = _DATE_4DIGIT_YEAR.findall(line)
+    if matches_4:
+        return int(matches_4[-1])
+    # Try 2-digit years
+    matches_2 = _DATE_2DIGIT_YEAR.findall(line)
+    if matches_2:
+        yy = int(matches_2[-1])
+        return 2000 + yy if yy < 80 else 1900 + yy
+    return None
+
+
 def _detect_year(lines: list[str]) -> int:
     """Try to detect the statement year from header lines.
     
-    Priority: billing period line > month name + year > MM/DD/YYYY date.
+    Priority: billing period line > month name + year > any dated line.
     For billing periods, use the *last* (end) date's year.
     """
     # Pass 1: look for billing period / statement date lines
     for line in lines[:30]:
-        match = _BILLING_PERIOD_YEAR.search(line)
-        if match:
-            # Find ALL years on this line, take the last one (end of period)
-            all_years = _DATE_SLASH_YEAR.findall(line)
-            if all_years:
-                return int(all_years[-1])
-            return int(match.group(2))
+        if _BILLING_PERIOD_YEAR.search(line):
+            year = _extract_year_from_line(line)
+            if year:
+                return year
 
     # Pass 2: month name followed by year (e.g. "January 2025 Statement")
     for line in lines[:30]:
@@ -228,11 +240,11 @@ def _detect_year(lines: list[str]) -> int:
         if match:
             return int(match.group(1))
 
-    # Pass 3: any MM/DD/YYYY date
+    # Pass 3: any MM/DD/YY or MM/DD/YYYY date
     for line in lines[:30]:
-        match = _DATE_SLASH_YEAR.search(line)
-        if match:
-            return int(match.group(1))
+        year = _extract_year_from_line(line)
+        if year:
+            return year
 
     from datetime import date as _date
     return _date.today().year

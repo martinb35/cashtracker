@@ -143,3 +143,28 @@ class TestCreditCardTextNormalizer:
         assert len(result.transactions) == 2
         assert result.transactions[0].amount == Decimal("12.33")
         assert result.transactions[1].amount == Decimal("240.00")
+
+    def test_rewards_noise_filtered_from_block(self):
+        """'Year To Date' continuation lines are excluded from blocks."""
+        data = _make_lines([
+            "Billing Period: 12/17/24-01/15/25",
+            "12/19 12/19 PLAY IT AGAIN SPORTS WOODINVILLE WA $44.04",
+            "Year To Date :",
+            "$91.75",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 1
+        assert str(result.transactions[0].amount) == "44.04"
+        assert "PLAY IT AGAIN SPORTS" in result.transactions[0].raw_description
+
+    def test_rewards_noise_inline_stripped(self):
+        """When 'Year To Date' is on the same line as the amount."""
+        data = _make_lines([
+            "Billing Period: 12/17/24-01/15/25",
+            "12/19 12/19 PLAY IT AGAIN SPORTS WOODINVILLE WA $44.04 Year To Date :",
+            "$91.75",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 1
+        assert str(result.transactions[0].amount) == "44.04"
+        assert "Year To Date" not in result.transactions[0].raw_description

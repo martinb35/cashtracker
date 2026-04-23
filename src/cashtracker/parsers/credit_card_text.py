@@ -37,7 +37,12 @@ _SECTION_HEADERS = {
     "minimum payment", "payment due",
 }
 
-# Transaction descriptions that indicate payments to skip (not credits/returns)
+# Lines containing these phrases are summary/rewards text, not transaction continuations
+_SUMMARY_NOISE = re.compile(
+    r"year\s+to\s+date|cash\s+back\s+reward|reward.*balance|"
+    r"certificate\s+amount|earned\s+this\s+period|summary",
+    re.IGNORECASE,
+)
 _PAYMENT_PATTERNS = re.compile(
     r"^(payment\s+thank\s+you|autopay|automatic\s+payment|payment\s+received|"
     r"balance\s+transfer|returned\s+payment)",
@@ -94,23 +99,23 @@ class CreditCardTextNormalizer(StatementNormalizer):
             remaining = first_line[date_match.end():]
             all_text = " ".join([remaining] + block_lines[1:]).strip()
 
-            # Find the amount (last occurrence to handle edge cases)
+            # Find the amount (first occurrence — the transaction amount)
             amount_matches = list(_AMOUNT_PATTERN.finditer(all_text))
             if not amount_matches:
                 warnings.append(f"No amount found for transaction starting: {first_line[:60]}")
                 continue
 
-            # Use the last amount found (the transaction amount, not intermediate text)
-            amount_match = amount_matches[-1]
+            amount_match = amount_matches[0]
             amount_str = amount_match.group(1)
 
-            # Description is everything except the amount
+            # Description is everything before the amount
             desc_before = all_text[:amount_match.start()].strip()
-            desc_after = all_text[amount_match.end():].strip()
             description = desc_before
-            # Append trailing text if it's meaningful (not just noise)
-            if desc_after and not _is_trailing_noise(desc_after):
-                description = f"{description} {desc_after}".strip()
+
+            # Strip any summary noise from description
+            noise_match = _SUMMARY_NOISE.search(description)
+            if noise_match:
+                description = description[:noise_match.start()].strip()
 
             if not description:
                 description = "(no description)"
@@ -153,7 +158,7 @@ def _group_into_blocks(lines: list[str]) -> list[list[str]]:
             if current_block:
                 blocks.append(current_block)
             current_block = [stripped]
-        elif current_block:
+        elif current_block and not _SUMMARY_NOISE.search(stripped):
             current_block.append(stripped)
 
     if current_block:

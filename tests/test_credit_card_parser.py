@@ -117,3 +117,30 @@ class TestCreditCardTextNormalizer:
         assert "PIE FOR THE PEOPLE" in result.transactions[1].raw_description
         assert result.transactions[1].amount == Decimal("63.35")
         assert result.transactions[2].amount == Decimal("5.50")
+
+    def test_amount_with_trailing_text(self):
+        """Amount followed by trailing text like 'Tot' or 'Costco'."""
+        data = _make_lines([
+            "January 2024 Statement",
+            "12/19 12/19 SP LADY YUM 186-65234486 WA $48.30 Tot",
+            "01/04 01/04 FSP*POSTDOC BREWING REDMOND WA $19.38",
+            "01/07 MS STUDIO H AG CAFE REDMOND WA $11.57 Costco",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 3
+        assert result.transactions[0].amount == Decimal("48.30")
+        assert "SP LADY YUM" in result.transactions[0].raw_description
+        assert result.transactions[1].amount == Decimal("19.38")
+        assert result.transactions[2].amount == Decimal("11.57")
+
+    def test_amount_near_start_of_line(self):
+        """Lines like '01/08 $12.33' where amount comes right after date."""
+        data = _make_lines([
+            "January 2024 Statement",
+            "01/08 $12.33",
+            "01/08 $240.00",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 2
+        assert result.transactions[0].amount == Decimal("12.33")
+        assert result.transactions[1].amount == Decimal("240.00")

@@ -10,23 +10,14 @@ from typing import Any
 from cashtracker.models import ParsedStatement, StatementMetadata, Transaction
 from cashtracker.parsers.base import StatementNormalizer
 
-# Single-line transaction: 12/19 12/19 CHICK-FIL-A #03801 $13.48
-_TXN_SINGLE_LINE = re.compile(
+# Line starting with a date: 12/19 or 12/19 12/19
+_DATE_START = re.compile(
     r"^(\d{1,2}/\d{1,2})\s+"           # sale date (MM/DD)
     r"(?:(\d{1,2}/\d{1,2})\s+)?"       # optional post date (MM/DD)
-    r"(.+?)\s+"                          # description
-    r"(-?\$[\d,]+\.\d{2})$"             # amount ($XX.XX or -$XX.XX)
 )
 
-# Start of a multi-line transaction: 12/29 12/29 PIE FOR THE PEOPLE NW    SNOQUALMIE
-_TXN_START = re.compile(
-    r"^(\d{1,2}/\d{1,2})\s+"           # sale date (MM/DD)
-    r"(?:(\d{1,2}/\d{1,2})\s+)?"       # optional post date (MM/DD)
-    r"(.+)$"                             # description start (rest of line)
-)
-
-# Amount on a continuation line: PAWA $63.35
-_AMOUNT_LINE = re.compile(r"(-?\$[\d,]+\.\d{2})\s*$")
+# Amount pattern anywhere in text: $13.48, -$609.87, $1,234.56
+_AMOUNT_PATTERN = re.compile(r"(-?\$[\d,]+\.\d{2})")
 
 # Statement year detection from header lines
 _YEAR_PATTERN = re.compile(r"\b(20\d{2})\b")
@@ -54,7 +45,7 @@ class CreditCardTextNormalizer(StatementNormalizer):
             return 0.0
 
         lines = [row.get("_raw_line", "") for row in raw_data]
-        matches = sum(1 for line in lines if _TXN_SINGLE_LINE.match(line) or _TXN_START.match(line))
+        matches = sum(1 for line in lines if _DATE_START.match(line))
         if matches == 0:
             return 0.0
         if matches >= 3:
@@ -70,62 +61,45 @@ class CreditCardTextNormalizer(StatementNormalizer):
         transactions = []
         warnings = []
 
-        i = 0
-        while i < len(lines):
-            line = lines[i].strip()
-            i += 1
+        # Group lines into transaction blocks.
+        # A new block starts when a line begins with a date pattern.
+        blocks = _group_into_blocks(lines)
 
-            if not line or _is_section_header(line):
+        for block_lines in blocks:
+            first_line = block_lines[0]
+            date_match = _DATE_START.match(first_line)
+            if not date_match:
                 continue
 
-            # Try single-line match first
-            match = _TXN_SINGLE_LINE.match(line)
-            if match:
-                sale_date_str, post_date_str, description, amount_str = match.groups()
-                txn = _build_transaction(
-                    sale_date_str, post_date_str, description.strip(),
-                    amount_str, statement_year, source_file, warnings,
-                )
-                if txn:
-                    transactions.append(txn)
+            sale_date_str = date_match.group(1)
+            post_date_str = date_match.group(2)
+
+            # Join all lines into one text, then extract amount and description
+            # Remove the date prefix from the first line
+            remaining = first_line[date_match.end():]
+            all_text = " ".join([remaining] + block_lines[1:]).strip()
+
+            # Find the amount (last occurrence to handle edge cases)
+            amount_matches = list(_AMOUNT_PATTERN.finditer(all_text))
+            if not amount_matches:
+                warnings.append(f"No amount found for transaction starting: {first_line[:60]}")
                 continue
 
-            # Try multi-line: line starts with date but no amount
-            start_match = _TXN_START.match(line)
-            if not start_match:
-                continue
+            # Use the last amount found (the transaction amount, not intermediate text)
+            amount_match = amount_matches[-1]
+            amount_str = amount_match.group(1)
 
-            sale_date_str, post_date_str, desc_start = start_match.groups()
-            description_parts = [desc_start.strip()]
-            amount_str = None
+            # Description is everything except the amount
+            desc_before = all_text[:amount_match.start()].strip()
+            desc_after = all_text[amount_match.end():].strip()
+            description = desc_before
+            # Append trailing text if it's meaningful (not just noise)
+            if desc_after and not _is_trailing_noise(desc_after):
+                description = f"{description} {desc_after}".strip()
 
-            # Collect continuation lines until we find an amount
-            while i < len(lines):
-                next_line = lines[i].strip()
+            if not description:
+                description = "(no description)"
 
-                # If next line starts a new transaction, stop
-                if _TXN_START.match(next_line) and not _is_continuation(next_line):
-                    break
-
-                i += 1
-
-                # Check if this continuation line has the amount
-                amount_match = _AMOUNT_LINE.search(next_line)
-                if amount_match:
-                    amount_str = amount_match.group(1)
-                    # Text before the amount is part of the description
-                    desc_part = next_line[:amount_match.start()].strip()
-                    if desc_part:
-                        description_parts.append(desc_part)
-                    break
-                elif next_line and not _is_section_header(next_line):
-                    description_parts.append(next_line)
-
-            if amount_str is None:
-                warnings.append(f"No amount found for transaction starting: {line[:50]}")
-                continue
-
-            description = " ".join(description_parts)
             txn = _build_transaction(
                 sale_date_str, post_date_str, description,
                 amount_str, statement_year, source_file, warnings,
@@ -141,13 +115,38 @@ class CreditCardTextNormalizer(StatementNormalizer):
         )
 
 
-def _is_continuation(line: str) -> bool:
-    """Check if a line that matches _TXN_START is actually a continuation line.
+def _group_into_blocks(lines: list[str]) -> list[list[str]]:
+    """Group lines into transaction blocks.
 
-    Continuation lines that happen to start with MM/DD are rare,
-    but we check if the line starts with whitespace (indented continuation).
+    A new block starts when a line begins with a date pattern (MM/DD).
+    Continuation lines (indented or non-date lines) are appended to the current block.
+    Section headers and empty lines are skipped.
     """
-    return line != line.lstrip()
+    blocks: list[list[str]] = []
+    current_block: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or _is_section_header(stripped):
+            continue
+
+        if _DATE_START.match(stripped):
+            if current_block:
+                blocks.append(current_block)
+            current_block = [stripped]
+        elif current_block:
+            current_block.append(stripped)
+
+    if current_block:
+        blocks.append(current_block)
+
+    return blocks
+
+
+def _is_trailing_noise(text: str) -> bool:
+    """Check if trailing text after the amount is noise to ignore."""
+    noise = {"tot", "total", "subtotal"}
+    return text.lower().strip() in noise
 
 
 def _build_transaction(

@@ -56,12 +56,13 @@ class TestParseCommand:
         )
         config_path = tmp_path / "categories.yaml"
         runner = CliRunner()
-        # Simulate: AI suggestion not available, user picks category 1 (groceries)
-        result = runner.invoke(
-            main,
-            ["parse", str(csv_file), "--no-ai", "-i", "-c", str(config_path)],
-            input="1\n",
-        )
+        # Mock _getch to return '1' (first category = groceries)
+        from unittest.mock import patch
+        with patch("cashtracker.cli._getch", return_value="1"):
+            result = runner.invoke(
+                main,
+                ["parse", str(csv_file), "--no-ai", "-i", "-c", str(config_path)],
+            )
         assert result.exit_code == 0
         assert "Learned 1 new keyword" in result.output
         # Verify keyword was saved

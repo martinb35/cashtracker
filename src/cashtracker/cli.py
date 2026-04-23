@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +15,24 @@ from cashtracker.output import write_csv, write_csv_stdout
 from cashtracker.parsers.registry import detect_and_parse
 from cashtracker.readers.csv_reader import read_csv
 from cashtracker.readers.pdf_reader import ScannedPDFError, read_pdf
+
+
+def _getch() -> str:
+    """Read a single keypress without requiring Enter."""
+    if sys.platform == "win32":
+        import msvcrt
+        ch = msvcrt.getwch()
+    else:
+        import termios
+        import tty
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    return ch
 
 
 @click.group()
@@ -93,37 +112,52 @@ def _interactive_prompt(
     ai_suggestion: str | None,
     category_names: list[str],
 ) -> Optional[tuple[str, str]]:
-    """Prompt the user to confirm or choose a category for a transaction."""
+    """Prompt the user to confirm or choose a category for a transaction.
+    
+    Single keypress — no Enter required.
+    """
     click.echo(f"\n{'─' * 60}", err=True)
     click.echo(f"  {txn.raw_description}", err=True)
     click.echo(f"  {txn.transaction_date}  ${txn.amount}", err=True)
     click.echo(f"{'─' * 60}", err=True)
 
     if ai_suggestion:
-        confirm = click.confirm(
-            f"  AI suggests: {ai_suggestion}. Accept?",
-            default=True,
-            err=True,
-        )
-        if confirm:
+        click.echo(f"  AI suggests: {ai_suggestion}. [y/n] ", err=True, nl=False)
+        ch = _getch()
+        click.echo(ch, err=True)
+        if ch.lower() != "n":
             return ai_suggestion, txn.raw_description.lower()
 
-    # Show numbered category menu
+    # Show numbered category menu with single-key selection
     click.echo("\n  Categories:", err=True)
-    for i, name in enumerate(category_names, 1):
-        click.echo(f"    {i:2d}. {name}", err=True)
-    click.echo(f"    {len(category_names) + 1:2d}. skip (leave uncategorized)", err=True)
+    # Map keys: 1-9 then a, b, c... for 10+
+    keys: list[str] = []
+    for i in range(len(category_names)):
+        if i < 9:
+            keys.append(str(i + 1))
+        else:
+            keys.append(chr(ord("a") + i - 9))
 
-    choice = click.prompt(
-        "  Enter number",
-        type=int,
-        err=True,
-    )
+    for i, name in enumerate(category_names):
+        click.echo(f"    {keys[i]}. {name}", err=True)
+    click.echo(f"    0. skip (leave uncategorized)", err=True)
 
-    if choice < 1 or choice > len(category_names):
+    click.echo("  Press key: ", err=True, nl=False)
+    ch = _getch()
+    click.echo(ch, err=True)
+
+    if ch == "0":
         return None
 
-    chosen = category_names[choice - 1]
+    try:
+        idx = keys.index(ch.lower())
+    except ValueError:
+        return None
+
+    if idx >= len(category_names):
+        return None
+
+    chosen = category_names[idx]
     return chosen, txn.raw_description.lower()
 
 

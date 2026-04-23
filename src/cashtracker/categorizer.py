@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional
 
 import httpx
 
@@ -14,16 +15,40 @@ from cashtracker.models import Transaction
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class CategorizationResult:
+    """Result of categorizing transactions, including any learned keywords."""
+
+    transactions: list[Transaction]
+    learned_keywords: dict[str, list[str]] = field(default_factory=dict)
+
+    def add_learned_keyword(self, category: str, keyword: str) -> None:
+        if category not in self.learned_keywords:
+            self.learned_keywords[category] = []
+        if keyword not in self.learned_keywords[category]:
+            self.learned_keywords[category].append(keyword)
+
+
+# Type for the interactive prompt callback.
+# Receives (transaction, ai_suggestion or None, list of category names).
+# Returns (chosen_category, keyword_to_learn) or None to skip.
+PromptFn = Callable[[Transaction, Optional[str], list[str]], Optional[tuple[str, str]]]
+
+
 def categorize_transactions(
     transactions: list[Transaction],
     config: Config,
     use_ai: bool = True,
-) -> list[Transaction]:
+    interactive: bool = False,
+    prompt_fn: PromptFn | None = None,
+) -> CategorizationResult:
     """Categorize transactions using a layered approach.
 
     1. Keyword/rule matching from config (fast, deterministic)
-    2. Ollama LLM for unmatched transactions (if use_ai=True)
+    2. If interactive: prompt user for each unmatched transaction (with optional AI suggestion)
+    3. If not interactive: batch Ollama categorization for unmatched (if use_ai=True)
     """
+    result = CategorizationResult(transactions=transactions)
     unmatched = []
 
     for txn in transactions:
@@ -34,10 +59,43 @@ def categorize_transactions(
         else:
             unmatched.append(txn)
 
-    if unmatched and use_ai:
+    if not unmatched:
+        return result
+
+    category_names = [c for c in config.category_names if c != "uncategorized"]
+
+    if interactive and prompt_fn:
+        still_unmatched = list(unmatched)
+        while still_unmatched:
+            txn = still_unmatched.pop(0)
+
+            # Re-check against keywords (may have been learned in a previous iteration)
+            category = _match_keywords(txn.raw_description, config.categories)
+            if category:
+                txn.category = category
+                txn.confidence = 1.0
+                continue
+
+            # Get AI suggestion if enabled
+            ai_suggestion = None
+            if use_ai:
+                ai_suggestion = _get_single_suggestion(txn, category_names, config)
+
+            choice = prompt_fn(txn, ai_suggestion, category_names)
+            if choice:
+                category, keyword = choice
+                txn.category = category
+                txn.confidence = 1.0
+                result.add_learned_keyword(category, keyword)
+                # Apply learned keyword immediately for remaining transactions
+                config.categories.setdefault(category, []).append(keyword)
+            else:
+                txn.category = "uncategorized"
+                txn.confidence = 0.0
+    elif use_ai:
         _categorize_with_ollama(unmatched, config)
 
-    return transactions
+    return result
 
 
 def _match_keywords(description: str, categories: dict[str, list[str]]) -> str | None:
@@ -66,6 +124,31 @@ def _categorize_with_ollama(transactions: list[Transaction], config: Config) -> 
             for txn in batch:
                 if txn.category == "uncategorized":
                     txn.confidence = 0.0
+
+
+def _get_single_suggestion(txn: Transaction, category_names: list[str], config: Config) -> str | None:
+    """Get a single AI category suggestion for one transaction."""
+    cats = ", ".join(category_names)
+    prompt = (
+        f"Categorize this transaction into exactly one of these categories: {cats}\n\n"
+        f"Transaction: {txn.raw_description} (${txn.amount})\n\n"
+        "Respond with ONLY the category name, nothing else."
+    )
+
+    try:
+        response = _call_ollama(prompt, config).strip().lower()
+        # Validate against allowed categories
+        allowed_lower = {c.lower(): c for c in category_names}
+        if response in allowed_lower:
+            return allowed_lower[response]
+        # Try partial match (Ollama might add quotes or punctuation)
+        for key, val in allowed_lower.items():
+            if key in response:
+                return val
+        return None
+    except Exception as e:
+        logger.warning("Ollama suggestion failed: %s", e)
+        return None
 
 
 def _categorize_batch(

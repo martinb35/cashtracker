@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from cashtracker.config import Config, OllamaConfig, load_config, write_default_config
+from cashtracker.config import Config, OllamaConfig, load_config, save_learned_keywords, write_default_config
 
 
 class TestLoadConfig:
@@ -79,3 +79,37 @@ class TestConfig:
         names = cfg.category_names
         assert "groceries" in names
         assert "uncategorized" in names
+
+
+class TestSaveLearnedKeywords:
+    def test_creates_file_if_missing(self, tmp_path: Path):
+        path = tmp_path / "categories.yaml"
+        save_learned_keywords({"dining": ["new place"]}, path)
+        assert path.exists()
+        cfg = load_config(path)
+        assert "new place" in cfg.categories["dining"]
+
+    def test_appends_to_existing(self, tmp_path: Path):
+        path = tmp_path / "categories.yaml"
+        write_default_config(path)
+        save_learned_keywords({"groceries": ["my local store"]}, path)
+        cfg = load_config(path)
+        assert "my local store" in cfg.categories["groceries"]
+        # Original keywords still present
+        assert "grocery" in cfg.categories["groceries"]
+
+    def test_no_duplicates(self, tmp_path: Path):
+        path = tmp_path / "categories.yaml"
+        write_default_config(path)
+        save_learned_keywords({"groceries": ["grocery"]}, path)  # already exists
+        cfg = load_config(path)
+        count = cfg.categories["groceries"].count("grocery")
+        assert count == 1
+
+    def test_case_insensitive_dedup(self, tmp_path: Path):
+        path = tmp_path / "categories.yaml"
+        write_default_config(path)
+        save_learned_keywords({"groceries": ["GROCERY"]}, path)
+        cfg = load_config(path)
+        grocery_lower = [k.lower() for k in cfg.categories["groceries"]]
+        assert grocery_lower.count("grocery") == 1

@@ -95,7 +95,7 @@ class OllamaConfig:
 class Config:
     """Application configuration."""
 
-    categories: dict[str, list[str]] = field(default_factory=lambda: dict(DEFAULT_CATEGORIES))
+    categories: dict[str, list[str]] = field(default_factory=lambda: {k: list(v) for k, v in DEFAULT_CATEGORIES.items()})
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
 
     @property
@@ -175,4 +175,50 @@ def write_default_config(path: Path | None = None) -> Path:
     }
 
     path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False), encoding="utf-8")
+    return path
+
+
+def save_learned_keywords(
+    learned: dict[str, list[str]],
+    path: Path | None = None,
+) -> Path:
+    """Merge learned keywords into an existing categories config file.
+
+    If the file doesn't exist, creates it with defaults + learned keywords.
+    """
+    if path is None:
+        path = Path(DEFAULT_CONFIG_NAME)
+
+    # Load existing config or start from defaults
+    if path.exists():
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            raw = {}
+    else:
+        raw = {}
+
+    categories = raw.get("categories", dict(DEFAULT_CATEGORIES))
+
+    for category, new_keywords in learned.items():
+        existing = categories.get(category, [])
+        if existing is None:
+            existing = []
+        existing_lower = {k.lower() for k in existing}
+        for kw in new_keywords:
+            if kw.lower() not in existing_lower:
+                existing.append(kw)
+        categories[category] = existing
+
+    raw["categories"] = categories
+    if "ollama" not in raw:
+        raw["ollama"] = {
+            "model": "llama3.2",
+            "base_url": "http://localhost:11434",
+            "timeout": 30.0,
+            "num_gpu": -1,
+            "max_batch_size": 10,
+        }
+
+    path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False), encoding="utf-8")
     return path

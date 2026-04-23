@@ -48,6 +48,28 @@ class TestParseCommand:
         assert result.exit_code != 0
         assert "Unsupported" in result.output
 
+    def test_parse_interactive_no_ai(self, tmp_path: Path):
+        csv_file = tmp_path / "statement.csv"
+        csv_file.write_text(
+            "Date,Description,Amount\n"
+            "01/15/2024,MYSTERIOUS PLACE,-20.00\n"
+        )
+        config_path = tmp_path / "categories.yaml"
+        runner = CliRunner()
+        # Simulate: AI suggestion not available, user picks category 1 (groceries)
+        result = runner.invoke(
+            main,
+            ["parse", str(csv_file), "--no-ai", "-i", "-c", str(config_path)],
+            input="1\n",
+        )
+        assert result.exit_code == 0
+        assert "Learned 1 new keyword" in result.output
+        # Verify keyword was saved
+        assert config_path.exists()
+        from cashtracker.config import load_config
+        cfg = load_config(config_path)
+        assert "mysterious place" in cfg.categories["groceries"]
+
 
 class TestConfigCommands:
     def test_config_init(self, tmp_path: Path):

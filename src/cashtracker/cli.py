@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 import click
 
-from cashtracker.categorizer import categorize_transactions
-from cashtracker.config import load_config, write_default_config
-from cashtracker.models import ParsedStatement
+from cashtracker.categorizer import PromptFn, categorize_transactions
+from cashtracker.config import load_config, save_learned_keywords, write_default_config
+from cashtracker.models import ParsedStatement, Transaction
 from cashtracker.output import write_csv, write_csv_stdout
 from cashtracker.parsers.registry import detect_and_parse
 from cashtracker.readers.csv_reader import read_csv
@@ -27,10 +28,20 @@ def main() -> None:
 @click.option("--config", "-c", type=click.Path(path_type=Path), default=None, help="Categories config file")
 @click.option("--model", "-m", type=str, default=None, help="Ollama model name")
 @click.option("--no-ai", is_flag=True, default=False, help="Skip Ollama, use keyword rules only")
+@click.option("--interactive", "-i", is_flag=True, default=False, help="Interactively confirm/assign categories")
 @click.option("--debug-headers", is_flag=True, default=False, help="Print extracted column headers and exit (no data shown)")
-def parse(file: Path, output: Path | None, config: Path | None, model: str | None, no_ai: bool, debug_headers: bool) -> None:
+def parse(
+    file: Path,
+    output: Path | None,
+    config: Path | None,
+    model: str | None,
+    no_ai: bool,
+    interactive: bool,
+    debug_headers: bool,
+) -> None:
     """Parse a bank statement and categorize transactions."""
     cfg = load_config(config)
+    config_path = Path(config) if config else Path("categories.yaml")
     if model:
         cfg.ollama.model = model
 
@@ -55,14 +66,65 @@ def parse(file: Path, output: Path | None, config: Path | None, model: str | Non
         raise SystemExit(1)
 
     # Categorize
-    categorize_transactions(statement.transactions, cfg, use_ai=not no_ai)
+    result = categorize_transactions(
+        statement.transactions,
+        cfg,
+        use_ai=not no_ai,
+        interactive=interactive,
+        prompt_fn=_interactive_prompt if interactive else None,
+    )
+
+    # Save learned keywords
+    if result.learned_keywords:
+        save_learned_keywords(result.learned_keywords, config_path)
+        total = sum(len(kws) for kws in result.learned_keywords.values())
+        click.echo(f"\nLearned {total} new keyword(s), saved to {config_path}", err=True)
 
     # Output
     if output:
-        write_csv(statement.transactions, output)
-        click.echo(f"Wrote {len(statement.transactions)} transactions to {output}")
+        write_csv(result.transactions, output)
+        click.echo(f"Wrote {len(result.transactions)} transactions to {output}")
     else:
-        write_csv_stdout(statement.transactions)
+        write_csv_stdout(result.transactions)
+
+
+def _interactive_prompt(
+    txn: Transaction,
+    ai_suggestion: str | None,
+    category_names: list[str],
+) -> Optional[tuple[str, str]]:
+    """Prompt the user to confirm or choose a category for a transaction."""
+    click.echo(f"\n{'─' * 60}", err=True)
+    click.echo(f"  {txn.raw_description}", err=True)
+    click.echo(f"  {txn.transaction_date}  ${txn.amount}", err=True)
+    click.echo(f"{'─' * 60}", err=True)
+
+    if ai_suggestion:
+        confirm = click.confirm(
+            f"  AI suggests: {ai_suggestion}. Accept?",
+            default=True,
+            err=True,
+        )
+        if confirm:
+            return ai_suggestion, txn.raw_description.lower()
+
+    # Show numbered category menu
+    click.echo("\n  Categories:", err=True)
+    for i, name in enumerate(category_names, 1):
+        click.echo(f"    {i:2d}. {name}", err=True)
+    click.echo(f"    {len(category_names) + 1:2d}. skip (leave uncategorized)", err=True)
+
+    choice = click.prompt(
+        "  Enter number",
+        type=int,
+        err=True,
+    )
+
+    if choice < 1 or choice > len(category_names):
+        return None
+
+    chosen = category_names[choice - 1]
+    return chosen, txn.raw_description.lower()
 
 
 @main.group()

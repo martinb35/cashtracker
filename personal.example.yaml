@@ -1,0 +1,5 @@
+# Copy this file to personal.yaml and add private statement cleanup values.
+# personal.yaml is ignored by Git and must not be committed.
+statement_noise:
+  cardholder_names:
+    - Jane Q Cardholder

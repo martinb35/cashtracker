@@ -1,0 +1,271 @@
+"""Tests for credit card text normalizer."""
+
+from datetime import date
+from decimal import Decimal
+
+from cashtracker.parsers.credit_card_text import CreditCardTextNormalizer
+
+
+def _make_lines(lines: list[str]) -> list[dict[str, str]]:
+    return [{"_raw_line": line, "_format": "text_lines"} for line in lines]
+
+
+class TestCreditCardTextNormalizer:
+    def setup_method(self):
+        self.normalizer = CreditCardTextNormalizer()
+
+    def test_can_handle_text_lines(self):
+        data = _make_lines([
+            "January 2024 Statement",
+            "ACCOUNT SUMMARY",
+            "12/19 12/19 CHICK-FIL-A #03801 $13.48",
+            "12/19 12/19 SP LADY YUM $58.60",
+            "12/20 12/20 FSP*POSTDOC BREWING $69.69",
+        ])
+        assert self.normalizer.can_handle(data) >= 0.4
+
+    def test_cannot_handle_csv_rows(self):
+        data = [{"Date": "01/15/2024", "Amount": "10", "Description": "TEST"}]
+        assert self.normalizer.can_handle(data) == 0.0
+
+    def test_cannot_handle_empty(self):
+        assert self.normalizer.can_handle([]) == 0.0
+
+    def test_normalize_with_post_date(self):
+        data = _make_lines([
+            "January 2024 Statement",
+            "12/19 12/19 CHICK-FIL-A #03801 $13.48",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 1
+        txn = result.transactions[0]
+        assert txn.transaction_date == date(2024, 12, 19)
+        assert txn.posted_date == date(2024, 12, 19)
+        assert "CHICK-FIL-A" in txn.raw_description
+        assert txn.amount == Decimal("13.48")
+
+    def test_normalize_payment_skipped(self):
+        """Payment lines are filtered out."""
+        data = _make_lines([
+            "January 2024 Statement",
+            "01/13 PAYMENT THANK YOU -$609.87",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 0
+
+    def test_skips_section_headers(self):
+        data = _make_lines([
+            "January 2024 Statement",
+            "ACCOUNT SUMMARY",
+            "Payments, Credits and Adjustments",
+            "01/13 PAYMENT THANK YOU -$609.87",
+            "Standard Purchases",
+            "12/19 12/19 CHICK-FIL-A #03801 $13.48",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 1
+        assert "CHICK-FIL-A" in result.transactions[0].raw_description
+
+    def test_detects_year_from_header(self):
+        data = _make_lines([
+            "Statement Period: December 2025",
+            "12/19 12/19 STORE $10.00",
+        ])
+        result = self.normalizer.normalize(data)
+        assert result.transactions[0].transaction_date.year == 2025
+
+    def test_multiple_transactions(self):
+        data = _make_lines([
+            "January 2024 Statement",
+            "12/19 12/19 CHICK-FIL-A #03801 $13.48",
+            "12/19 12/19 SP LADY YUM $58.60",
+            "12/19 12/19 PLAY IT AGAIN SPORTS $56.89",
+            "12/20 12/20 FSP*POSTDOC BREWING $69.69",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 4
+        assert result.transactions[3].amount == Decimal("69.69")
+
+    def test_multiline_transaction(self):
+        """Transaction where description wraps to next line with the amount."""
+        data = _make_lines([
+            "January 2024 Statement",
+            "12/29 12/29 PIE FOR THE PEOPLE NW    SNOQUALMIE",
+            " PAWA $63.35",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 1
+        txn = result.transactions[0]
+        assert txn.transaction_date == date(2024, 12, 29)
+        assert "PIE FOR THE PEOPLE" in txn.raw_description
+        assert "PAWA" in txn.raw_description
+        assert txn.amount == Decimal("63.35")
+
+    def test_multiline_mixed_with_single(self):
+        """Mix of single-line and multi-line transactions."""
+        data = _make_lines([
+            "January 2024 Statement",
+            "12/19 12/19 CHICK-FIL-A #03801 $13.48",
+            "12/29 12/29 PIE FOR THE PEOPLE NW    SNOQUALMIE",
+            " PAWA $63.35",
+            "12/30 12/30 STARBUCKS STORE $5.50",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 3
+        assert result.transactions[0].amount == Decimal("13.48")
+        assert "PIE FOR THE PEOPLE" in result.transactions[1].raw_description
+        assert result.transactions[1].amount == Decimal("63.35")
+        assert result.transactions[2].amount == Decimal("5.50")
+
+    def test_amount_with_trailing_text(self):
+        """Amount followed by trailing text like 'Tot' or 'Costco'."""
+        data = _make_lines([
+            "January 2024 Statement",
+            "12/19 12/19 SP LADY YUM 186-65234486 WA $48.30 Tot",
+            "01/04 01/04 FSP*POSTDOC BREWING REDMOND WA $19.38",
+            "01/07 MS STUDIO H AG CAFE REDMOND WA $11.57 Costco",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 3
+        assert result.transactions[0].amount == Decimal("48.30")
+        assert "SP LADY YUM" in result.transactions[0].raw_description
+        assert result.transactions[1].amount == Decimal("19.38")
+        assert result.transactions[2].amount == Decimal("11.57")
+
+    def test_amount_near_start_of_line(self):
+        """Lines like '01/08 $12.33' where amount comes right after date."""
+        data = _make_lines([
+            "January 2024 Statement",
+            "01/08 $12.33",
+            "01/08 $240.00",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 2
+        assert result.transactions[0].amount == Decimal("12.33")
+        assert result.transactions[1].amount == Decimal("240.00")
+
+    def test_rewards_noise_filtered_from_block(self):
+        """'Year To Date' continuation lines are excluded from blocks."""
+        data = _make_lines([
+            "Billing Period: 12/17/24-01/15/25",
+            "12/19 12/19 PLAY IT AGAIN SPORTS WOODINVILLE WA $44.04",
+            "Year To Date :",
+            "$91.75",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 1
+        assert str(result.transactions[0].amount) == "44.04"
+        assert "PLAY IT AGAIN SPORTS" in result.transactions[0].raw_description
+
+    def test_rewards_noise_inline_stripped(self):
+        """When 'Year To Date' is on the same line as the amount."""
+        data = _make_lines([
+            "Billing Period: 12/17/24-01/15/25",
+            "12/19 12/19 PLAY IT AGAIN SPORTS WOODINVILLE WA $44.04 Year To Date :",
+            "$91.75",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 1
+        assert str(result.transactions[0].amount) == "44.04"
+        assert "Year To Date" not in result.transactions[0].raw_description
+
+    def test_two_column_layout_description_before_date(self):
+        """Two-column PDF: description on line before date+amount line."""
+        data = _make_lines([
+            "Billing Period: 12/17/24-01/15/25",
+            "12/28 TST*COMMONWEALTH CAFE 425-434-0808 $83.71 electric vehicle (EV) charging purchases",
+            "WA worldwide, including gas and EV charging at",
+            "PIE FOR THE PEOPLE NW SNOQUALMIE Costco1................................................. +$0.00",
+            "12/29 12/29 $63.35",
+            "PAWA",
+            "3% on restaurants ............................... +$46.57",
+            "12/31 12/31 FSP*DRU BRU SNOQUALMIE PAWA $31.13",
+            "RED MOUNTAIN COFFEE SNOQUALMIE 3% on eligible travel worldwide.............. +$0.00",
+            "01/02 01/02 $53.38",
+            "PSWA",
+        ])
+        result = self.normalizer.normalize(data)
+        pie = [t for t in result.transactions if str(t.amount) == "63.35"]
+        assert len(pie) == 1
+        assert "PIE FOR THE PEOPLE" in pie[0].raw_description
+
+        red = [t for t in result.transactions if str(t.amount) == "53.38"]
+        assert len(red) == 1
+        assert "RED MOUNTAIN COFFEE" in red[0].raw_description
+
+    def test_citi_right_column_visit_link_stripped(self):
+        """Citi marketing text '» Visit Citi.com/costco' stripped from descriptions."""
+        data = _make_lines([
+            "Billing Period: 12/17/24-01/15/25",
+            "01/07 01/07 THE PARAMOUNT THEATR SEATTLE WA $17.50 » Visit Citi.com/costco",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 1
+        assert "Visit Citi" not in result.transactions[0].raw_description
+        assert "THE PARAMOUNT THEATR" in result.transactions[0].raw_description
+
+    def test_citi_for_more_information_stripped(self):
+        """'For More Information' noise stripped from descriptions."""
+        data = _make_lines([
+            "Billing Period: 12/17/24-01/15/25",
+            "01/07 01/07 BOMBO - SEATTLE SEATTLE WA $44.42 For More Information",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 1
+        assert "For More Information" not in result.transactions[0].raw_description
+        assert "BOMBO" in result.transactions[0].raw_description
+
+    def test_citi_rewards_per_year_stripped(self):
+        """Rewards text like '1up To $7,000 Per Year' stripped from descriptions."""
+        data = _make_lines([
+            "Billing Period: 12/17/24-01/15/25",
+            "01/08 01/08 SUMMIT AT SNOQUALMIE SNOQUALMIE PAWA $33.42 1up To $7,000 Per Year In Purchases, Then 1%",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 1
+        assert "Per Year" not in result.transactions[0].raw_description
+        assert "SUMMIT AT SNOQUALMIE" in result.transactions[0].raw_description
+
+    def test_citi_page_footer_stripped(self):
+        """Page footer noise stripped from multi-line descriptions."""
+        data = _make_lines([
+            "Billing Period: 12/17/24-01/15/25",
+            "01/08 01/08 WWW.DOXA-CHURCH.COM WWW.DOXA-CHURWA $240.00 Www.citicards.com Customer Service 1-",
+            "Page 3 Of 3 (tty: 711) Jane Q Cardholder Standard Purchases, Cont'd",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 1
+        desc = result.transactions[0].raw_description
+        assert "Customer Service" not in desc
+        assert "Page 3 Of 3" not in desc
+        assert "Standard Purchases" not in desc
+
+    def test_citi_financial_summary_stripped(self):
+        """Financial summary footer text stripped from last transaction."""
+        data = _make_lines([
+            "Billing Period: 12/17/24-01/15/25",
+            "01/10 01/10 COSTCO WHSE #1234 REDMOND WA $154.98 Total Fees For This Period $0.00",
+            "Total Interest For This Period $0.00",
+            "2025 Totals Year-To-Date",
+            "Annual Percentage Rate (APR)",
+        ])
+        result = self.normalizer.normalize(data)
+        assert len(result.transactions) == 1
+        desc = result.transactions[0].raw_description
+        assert "Total Fees" not in desc
+        assert "Annual Percentage" not in desc
+        assert "COSTCO WHSE" in desc
+
+    def test_personal_cardholder_name_stripped(self, tmp_path, monkeypatch):
+        """Names from ignored personal.yaml are removed from descriptions."""
+        (tmp_path / "personal.yaml").write_text(
+            "statement_noise:\n  cardholder_names:\n    - Jane Q Cardholder\n",
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        data = _make_lines([
+            "Billing Period: 12/17/24-01/15/25",
+            "01/08 01/08 SAMPLE MERCHANT Jane Q Cardholder $12.34",
+        ])
+        result = self.normalizer.normalize(data)
+        assert result.transactions[0].raw_description == "SAMPLE MERCHANT"
